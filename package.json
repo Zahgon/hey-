@@ -1,0 +1,35 @@
+{
+  "name": "hey-js",
+  "version": "0.0.1",
+  "description": "HTTP load generator \u2014 JavaScript port of rakyll/hey",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./requester": "./src/requester/index.js"
+  },
+  "bin": {
+    "hey": "./bin/hey.js"
+  },
+  "files": [
+    "src",
+    "bin",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test \"test/**/*.test.js\"",
+    "test:baseline": "bash test/verification/gen-go-baseline.sh",
+    "test:corpus": "QC_RUN_HARNESS=1 node test/verification/build-corpus.mjs",
+    "test:cli-diff": "QC_RUN_HARNESS=1 node test/verification/cli-diff.mjs",
+    "check": "node -e \"for (const f of require('node:fs').readdirSync('.',{recursive:true})) if (/\\\\.(js|mjs)$/.test(f) && !f.startsWith('node_modules')) require('node:child_process').execFileSync(process.execPath,['--check',f]);\" && echo 'node --check: all files OK'",
+    "test:request-diff": "QC_RUN_HARNESS=1 node test/verification/request-diff.mjs",
+    "verify": "npm run test:corpus && npm run test:baseline && npm test"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

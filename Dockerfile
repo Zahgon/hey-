@@ -1,33 +1,9 @@
-FROM golang:1.15 as build
-
-# Create appuser.
-# See https://stackoverflow.com/a/55757473/12429735
-ENV USER=appuser
-ENV UID=10001
-RUN adduser \
-    --disabled-password \
-    --gecos "" \
-    --home "/nonexistent" \
-    --shell "/sbin/nologin" \
-    --no-create-home \
-    --uid "${UID}" \
-    "${USER}"
-
-RUN apt-get update && apt-get install -y ca-certificates
-RUN go get github.com/rakyll/hey
-
-# Build
-WORKDIR /go/src/github.com/rakyll/hey
-RUN go mod download
-RUN CGO_ENABLED=0 GOOS=linux go build -o /go/bin/hey hey.go
-
-###############################################################################
-# final stage
-FROM scratch
-COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=build /etc/passwd /etc/passwd
-COPY --from=build /etc/group /etc/group
-USER appuser:appuser
+# Port of the Go Dockerfile.
+#
+# The Go original used a two-stage build ending in `scratch`, which a static Go
+# binary allows. Node needs its runtime, so the final stage is a distroless
+# Node image instead. There is nothing to compile, so there is no build stage.
+FROM gcr.io/distroless/nodejs22-debian12
 
 ARG APPLICATION="hey"
 ARG DESCRIPTION="HTTP load generator, ApacheBench (ab) replacement, formerly known as rakyll/boom"
@@ -40,5 +16,10 @@ LABEL org.opencontainers.image.ref.name="${PACKAGE}" \
     org.opencontainers.image.licenses="Apache 2.0" \
     org.opencontainers.image.source="https://github.com/${PACKAGE}"
 
-COPY --from=build /go/bin/${APPLICATION} /hey
-ENTRYPOINT ["/hey"]
+WORKDIR /app
+COPY package.json ./
+COPY src ./src
+COPY bin ./bin
+
+USER nonroot:nonroot
+ENTRYPOINT ["/nodejs/bin/node", "/app/bin/hey.js"]

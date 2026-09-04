@@ -1,0 +1,97 @@
+// Differential driver. Copied into a scratch clone of the Go repo as
+// requester/zz_driver_test.go equivalent (package requester) so it can reach
+// the UNEXPORTED report type — the same white-box access hey's own tests use.
+//
+// Reads one JSON job from stdin, replays it through the real Go report
+// pipeline, and writes the rendered bytes to stdout. The JS driver consumes the
+// identical JSON and must produce byte-identical output.
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"time"
+)
+
+type jobResult struct {
+	Err           string `json:"err"`
+	StatusCode    int    `json:"statusCode"`
+	OffsetNs      int64  `json:"offsetNs"`
+	DurationNs    int64  `json:"durationNs"`
+	ConnNs        int64  `json:"connNs"`
+	DNSNs         int64  `json:"dnsNs"`
+	ReqNs         int64  `json:"reqNs"`
+	ResNs         int64  `json:"resNs"`
+	DelayNs       int64  `json:"delayNs"`
+	ContentLength int64  `json:"contentLength"`
+}
+
+type job struct {
+	Output  string      `json:"output"`
+	TotalNs int64       `json:"totalNs"`
+	N       int         `json:"n"`
+	Results []jobResult `json:"results"`
+}
+
+func main() {
+	raw, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "read:", err)
+		os.Exit(1)
+	}
+	var jobs []job
+	if err := json.Unmarshal(raw, &jobs); err != nil {
+		fmt.Fprintln(os.Stderr, "unmarshal:", err)
+		os.Exit(1)
+	}
+
+	out := []map[string]string{}
+	for _, j := range jobs {
+		out = append(out, map[string]string{"output": runJob(j)})
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(out); err != nil {
+		fmt.Fprintln(os.Stderr, "encode:", err)
+		os.Exit(1)
+	}
+}
+
+func runJob(j job) string {
+	buf := &bytes.Buffer{}
+	results := make(chan *result, len(j.Results)+1)
+	rep := newReport(buf, results, j.Output, j.N)
+
+	done := make(chan bool, 1)
+	go func() {
+		runReporter(rep)
+		done <- true
+	}()
+
+	for _, r := range j.Results {
+		var e error
+		if r.Err != "" {
+			e = errors.New(r.Err)
+		}
+		results <- &result{
+			err:           e,
+			statusCode:    r.StatusCode,
+			offset:        time.Duration(r.OffsetNs),
+			duration:      time.Duration(r.DurationNs),
+			connDuration:  time.Duration(r.ConnNs),
+			dnsDuration:   time.Duration(r.DNSNs),
+			reqDuration:   time.Duration(r.ReqNs),
+			resDuration:   time.Duration(r.ResNs),
+			delayDuration: time.Duration(r.DelayNs),
+			contentLength: r.ContentLength,
+		}
+	}
+	close(results)
+	<-done
+	rep.finalize(time.Duration(j.TotalNs))
+	return buf.String()
+}
